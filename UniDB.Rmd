@@ -1,0 +1,384 @@
+---
+title: "University DB Implementation"
+author: "Raphael Russo"
+output: html_notebook
+---
+
+## Overview
+This is a simple example implementation of a relational database for a university based off of the schema outlined in `University_ERD.pdf` which is in BCNF. It includes students, majors, courses, faculty, etc. Data will be loaded a csv file of students and the courses they have taken, and stored in a SQLite database using R and SQL, and at the end, various queries will be made. Student data is generated using `generate_data.py` and can be found in `generated_u_data.csv`.
+
+## Connect To Database
+
+First, connect to the database, or create a new one if it does not already exist. 
+```{r}
+library(RSQLite)
+library(DBI)
+library(sqldf)
+library(reticulate)
+data.file <- "generated_u_data.csv"
+dbfile <- "UniDB.db"
+if (file.exists(dbfile)) {
+  file.remove(dbfile) # just get rid of the db instead of dropping all the tables to start fresh
+}
+if (file.exists(data.file)) {
+  file.remove(data.file)
+}
+py_run_file("generate_data.py")
+dbcon <- dbConnect(RSQLite::SQLite(), dbfile)
+dbExecute(dbcon, "PRAGMA foreign_keys = ON")
+```
+
+## Create Tables
+
+Students Table:
+```{sql createStudents, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Students (
+  student_id INTEGER,
+  first_name TEXT NOT NULL,
+  last_name TEXT,
+  birth_date DATE NOT NULL,
+  email TEXT,
+  expected_graduation DATE,
+  PRIMARY KEY (student_id)
+)
+```
+
+Faculty Table:
+```{sql createFaculty, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Faculty (
+  faculty_id INTEGER,
+  first_name TEXT NOT NULL,
+  last_name TEXT,
+  birth_date DATE NOT NULL,
+  email TEXT,
+  PRIMARY KEY (faculty_id)
+)
+```
+
+Departments Table:
+TO DO - ADD DEPARTMENT HEAD IN DATA GEN
+```{sql createDepartments, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Departments (
+  department_id INTEGER,
+  department_name TEXT NOT NULL,
+  department_head INTEGER,
+  department_code TEXT NOT NULL,
+  PRIMARY KEY (department_id),
+  FOREIGN KEY (department_head) REFERENCES Faculty (faculty_id) 
+)
+```
+
+Department Members Table:
+```{sql createDepartmentMembers, connection=dbcon}
+CREATE TABLE IF NOT EXISTS DepartmentMembers (
+  dm_id INTEGER,
+  faculty_id INTEGER NOT NULL,
+  department_id INTEGER NOT NULL,
+  PRIMARY KEY (dm_id),
+  FOREIGN KEY (faculty_id) REFERENCES Faculty (faculty_id),
+  FOREIGN KEY (department_id) REFERENCES Departments (department_id)
+)
+```
+
+Courses Table:
+```{sql createCourses, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Courses (
+  course_id INTEGER,
+  course_name TEXT NOT NULL,
+  course_code INTEGER NOT NULL,
+  department_id INTEGER NOT NULL,
+  faculty_id INTEGER NOT NULL,
+  semester_offered TEXT NOT NULL,
+  PRIMARY KEY (course_id),
+  FOREIGN KEY (department_id) REFERENCES Departments,
+  FOREIGN KEY (faculty_id) REFERENCES Faculty (faculty_id)
+)
+```
+
+Composite Key for Courses:
+```{sql createCompositeCourseKeyView, connection=dbcon}
+CREATE VIEW CoursesWithComposite AS
+SELECT *, department_code || course_code || semester_offered AS composite_key
+FROM Courses;
+```
+
+Majors Table:
+```{sql createMajors, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Majors (
+  major_id INTEGER,
+  major_name TEXT NOT NULL,
+  department_id INTEGER NOT NULL,
+  PRIMARY KEY (major_id),
+  FOREIGN KEY (department_id) REFERENCES Departments (department_id)
+)
+```
+
+Student Majors Table:
+```{sql creatStudentMajors, connection=dbcon}
+CREATE TABLE IF NOT EXISTS StudentMajors (
+  student_id INTEGER NOT NULL,
+  major_id INTEGER NOT NULL,
+  CONSTRAINT student_major_id PRIMARY KEY (student_id, major_id),
+  FOREIGN KEY (student_id) REFERENCES Students (student_id),
+  FOREIGN KEY (major_id) REFERENCES Majors (major_id)
+  
+)
+```
+
+
+Required Courses Table:
+```{sql createRequiredCourses, connection=dbcon}
+CREATE TABLE IF NOT EXISTS RequiredCourses (
+  rc_id INTEGER,
+  course_id INTEGER NOT NULL,
+  major_id INTEGER NOT NULL,
+  PRIMARY KEY (rc_id),
+  FOREIGN KEY (course_id) REFERENCES Courses (course_id),
+  FOREIGN KEY (major_id) REFERENCES Majors (major_id)
+)
+```
+
+Elective Courses Table:
+```{sql createElectiveCourses, connection=dbcon}
+CREATE TABLE IF NOT EXISTS ElectiveCourses (
+  ec_id INTEGER,
+  course_id INTEGER NOT NULL,
+  major_id INTEGER NOT NULL,
+  PRIMARY KEY (ec_id),
+  FOREIGN KEY (course_id) REFERENCES Courses (course_id),
+  FOREIGN KEY (major_id) REFERENCES Majors (major_id)
+)
+```
+
+Classrooms Table:
+```{sql createClassrooms, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Classrooms (
+  classroom_id INTEGER,
+  room_number INTEGER,
+  building_name TEXT,
+  capacity INTEGER,
+  PRIMARY KEY (classroom_id)
+)
+```
+
+Course Schedules Table:
+```{sql createCourseSchedules, connection=dbcon}
+CREATE TABLE IF NOT EXISTS CourseSchedules (
+  schedule_id INTEGER,
+  course_id INTEGER NOT NULL,
+  classroom_id INTEGER NOT NULL,
+  start_time TIME,
+  end_time TIME,
+  PRIMARY KEY (schedule_id)
+)
+```
+
+Days of Week Table:
+```{sql createDaysOfWeek, connection=dbcon}
+CREATE TABLE IF NOT EXISTS DaysOfWeek (
+    day_id INTEGER PRIMARY KEY,
+    day_name TEXT(1) NOT NULL
+);
+
+```
+
+Course Scheduled Days Table:
+```{sql createScheduledDays, connection=dbcon}
+CREATE TABLE IF NOT EXISTS CourseScheduleDays (
+    schedule_id INTEGER,
+    day_id INTEGER,
+    CONSTRAINT cs_id PRIMARY KEY (schedule_id, day_id),
+    FOREIGN KEY (schedule_id) REFERENCES CourseSchedules(schedule_id),
+    FOREIGN KEY (day_id) REFERENCES DaysOfWeek(day_id)
+);
+```
+
+## Check Table Creation
+
+## Loading CSV Data
+
+Read the student data csv:
+```{r loadStudentData}
+stu.data.raw <- read.csv("generated_u_data.csv")
+```
+
+Populate Days of Week table:
+```{r insertDaysOfWeek}
+days = c("U", "M", "T", "W", "R", "F", "S")
+ndays = length(days)
+sql <- "insert into DaysOfWeek (day_id, day_name) values"
+for (i in 1:ndays) {
+  day = days[i]
+  val = paste0("(", i, ",'", day, "')")
+  if (i != ndays) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+
+print(sql)
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM DaysOfWeek
+```
+Populate Student Table
+```{r}
+get.students <- "select distinct StudentID,StudentFirstName,StudentLastName,StudentEmail,StudentDOB,StudentGradDate from `stu.data.raw`"
+stu.info <- sqldf(get.students)
+nrows <- nrow(stu.info)
+
+sql <- "insert into Students (student_id, first_name, last_name, birth_date, email, expected_graduation) values"
+#stu.info
+#nrows
+for (i in 1:nrows) {
+  id <- stu.info$StudentID[i]
+  f.name <- stu.info$StudentFirstName[i]
+  l.name <- stu.info$StudentLastName[i]
+  email <- stu.info$StudentEmail[i]
+  dob <- stu.info$StudentDOB[i]
+  grad <- stu.info$StudentGradDate[i]
+  val = paste0("(", id, ",'", f.name, "','", l.name, "','", dob, "','", email, "','", grad, "')")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+#sql
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM STUDENTS
+```
+Populate Faculty Table
+```{r}
+get.fac <- "select distinct FacultyID,FacultyFirstName,FacultyLastName,FacultyDOB, FacultyEmail from `stu.data.raw`"
+fac.info <- sqldf(get.fac)
+nrows <- nrow(fac.info)
+
+sql <- "insert into Faculty (faculty_id, first_name, last_name, birth_date, email) values"
+#fac.info
+#nrows
+for (i in 1:nrows) {
+  id <- fac.info$FacultyID[i]
+  f.name <- fac.info$FacultyFirstName[i]
+  l.name <- fac.info$FacultyLastName[i]
+  email <- fac.info$FacultyEmail[i]
+  dob <- fac.info$FacultyDOB[i]
+  val = paste0("(", id, ",'", f.name, "','", l.name, "','", dob, "','", email, "')")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+#sql
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM Faculty
+```
+Populating Department Table
+```{r}
+get.dep <- "select distinct DepartmentCode,DepartmentName from `stu.data.raw`"
+dep.info <- sqldf(get.dep)
+nrows <- nrow(dep.info)
+
+sql <- "insert into Departments (department_id, department_name, department_code) values"
+#fac.info
+#nrows
+for (i in 1:nrows) {
+  id <- i
+  name <- dep.info$DepartmentName[i]
+  code <- dep.info$DepartmentCode[i]
+  val = paste0("(", id, ",'", name, "','", code, "')")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+#sql
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM Departments
+```
+Populate Department Members
+```{r}
+# probably need to go through the list and select distinct faculty again then get the dep
+sql <- "select distinct (FacultyID), DepartmentCode, DepartmentName from `stu.data.raw` order by facultyid"
+sqldf(sql) # There is an issue with faculty members teaching in various departments - resolve this
+```
+Populate Courses Table:
+```{r}
+get.courses <- "select distinct coursecode, semester, departmentcode, facultyid, CourseName from `stu.data.raw`"
+course.info <- sqldf(get.courses)
+course.info
+
+nrows <- nrow(course.info)
+
+sql <- "insert into Courses (course_id, course_name, department_id, faculty_id, semester_offered, course_code) values"
+
+#dep.id <- dbGetQuery(dbcon, "select department_id from departments where department_code = 'HIST'")
+#dep.id$department_id
+for (i in 1:nrows) {
+  id <- i
+  course.code <- course.info$CourseCode[i]
+  course.name <- course.info$CourseName[i]
+  semester <- course.info$Semester[i]
+  department.code <- course.info$DepartmentCode[i]
+  fid <- course.info$FacultyID[i]
+  id.sql <- paste0("select department_id from departments where department_code = '", department.code, "'")
+  dep.id <- dbGetQuery(dbcon, id.sql)
+  val = paste0("(", id, ",'", course.name, "',", dep.id, ",", fid, ",'", semester, "','", course.code, "')")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM Courses
+```
+Populating Classroom Table
+```{r}
+get.rooms <- "select distinct Building, RoomNumber, Capacity from `stu.data.raw`"
+rooms.info <- sqldf(get.rooms)
+rooms.info
+
+nrows <- nrow(rooms.info)
+
+sql <- "insert into Classrooms (classroom_id, room_number, building_name, capacity) values"
+
+#dep.id <- dbGetQuery(dbcon, "select department_id from departments where department_code = 'HIST'")
+#dep.id$department_id
+for (i in 1:nrows) {
+  id <- i
+  room.num <- rooms.info$RoomNumber[i]
+  building <- rooms.info$Building[i]
+  capacity <- rooms.info$Capacity[i]
+  val = paste0("(", id, ",", room.num, ",'", building, "',", capacity, ")")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM Classrooms ORDER BY classroom_id DESC
+```
+## Making Some Sample Queries
+
+## Adding Some Triggers 
+
+## Inserting New Data and Checking Triggers
+
+## Finish Up
+
+Finally, disconnect from the database
+```{r}
+dbDisconnect(dbcon)
+```
