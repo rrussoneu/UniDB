@@ -1,5 +1,5 @@
 ---
-title: "University DB Implementation"
+title: "Example University DB Implementation"
 author: "Raphael Russo"
 output: html_notebook
 ---
@@ -359,9 +359,33 @@ SELECT * FROM Classrooms ORDER BY building_name DESC
 ```
 Populating Course Schedules Table:
 ```{r}
-get.courses <- dbGetQuery(dbcon, "select * from courses")
+get.courses <- "select distinct coursecode, coursename, semester, departmentcode, Building, RoomNumber, Capacity, DaysOfWeek, StartTime,EndTime from `stu.data.raw`"
+c.info <- sqldf(get.courses)
+nrows = nrow(c.info)
 
+sql <- "insert into CourseSchedules (schedule_id, course_id, classroom_id, start_time, end_time) values "
+for (i in 1:nrows) {
+  b = c.info$Building[i]
+  r = c.info$RoomNumber[i]
+  capacity = c.info$Capacity[i]
+  get.cid <- "select classroom_id from classrooms where building_name = '"
+  get.cid <- paste0(get.cid, b, "' and room_number = ", r, " and capacity = ", capacity)
+  room.id = dbGetQuery(dbcon, get.cid)
+  course.id <- dbGetQuery(dbcon, paste0("select c.course_id, d.department_code from courses c, departments d  where d.department_id = c.department_id and c.course_code = '", c.info$CourseCode[i], "' and d.department_code = '", c.info$DepartmentCode[i], "' and c.semester_offered = '", c.info$Semester[i], "'"))
+  val = paste0("(", i, ",", course.id$course_id, ",", room.id, ",'", c.info$StartTime[i], "','", c.info$EndTime[i],"'", ")")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+
+rs <- dbExecute(dbcon, sql)
 ```
+
+```{sql connection=dbcon}
+select * from courseSchedules
+```
+
 
 ```{sql connection=dbcon}
 SELECT * FROM CoursesWithComposite
