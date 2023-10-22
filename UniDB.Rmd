@@ -193,6 +193,16 @@ CREATE TABLE IF NOT EXISTS CourseScheduleDays (
 );
 ```
 
+Enrollment Table:
+```{sql createEnrollmentTable, connection=dbcon}
+CREATE TABLE IF NOT EXISTS Enrollment (
+  student_id INTEGER,
+  course_id INTEGER,
+  grade NUMERIC,
+  CONSTRAINT enrollment_id PRIMARY KEY (student_id, course_id)
+)
+```
+
 ## Check Table Creation
 
 ## Loading CSV Data
@@ -418,7 +428,7 @@ select * from courseScheduleDays
 
 Populating Major Table and StudentMajor Table
 ```{r}
-major.info <- "select distinct StudentId, StudentMajor from `stu.data.raw`"
+major.info <- "select distinct StudentID, StudentMajor from `stu.data.raw`"
 major.info <- sqldf(major.info)
 majors <- unique(major.info$StudentMajor)
 m.rows <- length(majors[])
@@ -448,6 +458,37 @@ rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
 SELECT * FROM StudentMajors
+```
+
+```{r}
+enrollment.info <- "select distinct StudentID, CourseCode, Semester, DepartmentCode, Grade from `stu.data.raw`"
+enrollment.info <- sqldf(enrollment.info)
+enrollment.info
+sql <- "insert into enrollment (student_id, course_id, grade) values "
+for (i in 1:nrow(enrollment.info)) {
+  stu.id <- enrollment.info$StudentID[i]
+  #print(stu.id)
+  c.code <- enrollment.info$CourseCode[i]
+  dep.id <- dbGetQuery(dbcon, paste0("select department_id from departments where department_code = '", enrollment.info$DepartmentCode[i], "'"))
+  c.id <- dbGetQuery(dbcon, paste0("select course_id from courses where course_code = '", c.code, "' and semester_offered ='", enrollment.info$Semester[i], "' and department_id ='", dep.id, "'"))
+  grade <- enrollment.info$Grade[i]
+  if (is.na(grade)) {
+    grade <- "NULL"
+    val <- paste0("(", stu.id, ",", c.id, ",", grade, ")")
+  }
+  else {
+    val <- paste0("(", stu.id, ",", c.id, ",", grade, ")")
+  }
+  if (i != nrow(enrollment.info)) {
+    val <- paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+#print(sql)
+rs <- dbExecute(dbcon, sql)
+```
+```{sql connection=dbcon}
+SELECT * FROM ENROLLMENT
 ```
 
 
