@@ -497,7 +497,35 @@ SELECT * FROM CoursesWithComposite
 ```
 
 ## Making Some Sample Queries
+First, get the average grade for all students at the university
+```{sql connection=dbcon}
+SELECT avg(e.grade) from enrollment e
+```
+Get all of the grades for each student
+```{sql connection=dbcon}
+select distinct s.student_id, e.grade from students s, enrollment e where s.student_id = e.student_id
+```
 
+Get the average grade for each student
+```{sql connection=dbcon}
+select student_id, avg(grade) as AvgGrade from enrollment group by student_id
+```
+Get students with an average grade above the average of the university
+```{sql connection=dbcon}
+WITH avgGrades as (
+select student_id, avg(grade) as AvgGrade from enrollment group by student_id
+),
+uniAvg as (
+SELECT avg(e.grade) as UniAvg from enrollment e
+)
+select a.student_id, a.AvgGrade from avgGrades a where (a.AvgGrade > (select UniAvg from uniAvg)) ORDER BY a.AvgGrade DESC
+```
+
+Get students who qualify for cum laude:
+
+Get students who qualify for magna cum laude:
+
+Get students who qualift for summa cum laude:
 ## Adding Some Triggers 
 
 ## Inserting New Data and Checking Triggers
