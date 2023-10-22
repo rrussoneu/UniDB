@@ -520,12 +520,68 @@ SELECT avg(e.grade) as UniAvg from enrollment e
 )
 select a.student_id, a.AvgGrade from avgGrades a where (a.AvgGrade > (select UniAvg from uniAvg)) ORDER BY a.AvgGrade DESC
 ```
+This query is probably pretty common and so will be all the average grades. Let's turn them each into a view and make sure no null grades are added:
+```{sql connection=dbcon}
+CREATE VIEW UniAverageGrades AS
+WITH avgGrades as (
+select student_id, avg(grade) as AvgGrade from enrollment where grade is not null group by student_id
+),
+uniAvg as (
+SELECT avg(e.grade) as UniAvg from enrollment e
+)
+select a.student_id, a.AvgGrade from avgGrades a ORDER BY a.AvgGrade DESC
+```
+```{sql connection=dbcon}
+CREATE VIEW UniTopGrades AS
+WITH avgGrades as (
+select student_id, avg(grade) as AvgGrade from enrollment where grade is not null group by student_id
+),
+uniAvg as (
+SELECT avg(e.grade) as UniAvg from enrollment e
+)
+select a.student_id, a.AvgGrade from avgGrades a where (a.AvgGrade > (select UniAvg from uniAvg)) ORDER BY a.AvgGrade DESC
+```
 
-Get students who qualify for cum laude:
+Check to make sure the view is working
+```{sql connection=dbcon}
+SELECT * FROM UniAverageGrades
+```
+```{sql connection=dbcon}
+SELECT * FROM UniTopGrades
+```
+Let's get every student who will qualify for latin honors (top 30% of students) so we can send them a congratulatory email:
+```{sql connection=dbcon}
+WITH percents as (
+SELECT student_id, AvgGrade, NTILE(10) OVER (ORDER BY AvgGrade) as nt FROM UniAverageGrades
+)
+SELECT p.student_id, s.first_name, s.last_name, s.email from percents p, students s where p.nt > 7 and p.student_id = s.student_id ORDER BY p.AvgGrade DESC
+```
+Get only the students who qualify for summa cum laude (first 5 percent):
+```{sql connection=dbcon}
+WITH percents as (
+SELECT student_id, AvgGrade, NTILE(20) OVER (ORDER BY AvgGrade) as nt FROM UniAverageGrades
+)
+SELECT p.student_id, s.first_name, s.last_name, s.email from percents p, students s where p.nt = 20 and p.student_id = s.student_id ORDER BY p.AvgGrade DESC
+```
 
-Get students who qualify for magna cum laude:
+Get only the students who qualify for magna cum laude (next 10 percent):
+```{sql connection=dbcon}
+WITH percents as (
+SELECT student_id, AvgGrade, NTILE(20) OVER (ORDER BY AvgGrade) as nt FROM UniAverageGrades
+)
+SELECT p.student_id, s.first_name, s.last_name, s.email from percents p, students s where p.nt < 20 and p.nt > 17 and p.student_id = s.student_id ORDER BY p.AvgGrade DESC
+```
 
-Get students who qualift for summa cum laude:
+Get only the students who qualify for cum laude (next 15 percent):
+```{sql connection=dbcon}
+WITH percents as (
+SELECT student_id, AvgGrade, NTILE(20) OVER (ORDER BY AvgGrade) as nt FROM UniAverageGrades
+)
+SELECT p.student_id, s.first_name, s.last_name, s.email from percents p, students s where p.nt < 18 and p.nt > 14 and p.student_id = s.student_id  ORDER BY p.AvgGrade DESC
+```
+
+
+
 ## Adding Some Triggers 
 
 ## Inserting New Data and Checking Triggers
