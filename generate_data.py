@@ -36,6 +36,15 @@ def main():
         "BIO": ["Botany", "Zoology", "Microbiology", "Genetics"],
         "HIST": ["World History", "European History", "American History", "Asian History"]
     }
+    
+    department_heads = {
+      "Mathematics": -1,
+      "English": -1,
+      "Physics": -1,
+      "Chemistry": -1,
+      "Biology": -1,
+      "History": -1,
+      }
 
     # Some codes for the courses
     # e.g. Alegbra = MATH101    
@@ -121,9 +130,41 @@ def main():
 
     # Store details for courses for consistency across students
     course_cache = {}
-
+    classroom_cache = {}
+    
+    classroom_keys = []
+    # Generate Classrooms
+    for building in BUILDINGS:
+      rms = []
+      for i in range(1, 6):
+        used = True
+        while used:
+          room_number = random.randint(10, 40)
+          if room_number not in rms:
+            rms.append(room_number)
+            used = False
+        classroom_key = f"{building}_{room_number}"
+        capacity = random.randint(15, 90)
+        if classroom_key not in classroom_cache:
+          classroom_cache[classroom_key] = {
+            "Building": building,
+            "RoomNumber": room_number,
+            "Capacity": capacity
+          }
+          classroom_keys.append(classroom_key)
+    
     records = []
-
+    
+    # Assigning department heads randomly
+    for d in DEPARTMENTS:
+      needs_head = True
+      while needs_head:
+        faculty = random.choice(faculty_records)
+        department_heads[d["DepartmentName"]] = faculty["FacultyID"] if faculty["FacultyID"] not in department_heads.values() else -1
+        if (department_heads[d["DepartmentName"]] != -1):
+          needs_head = False
+    
+    
     for student in student_records:
         #print(student)
         student_courses = random.sample(
@@ -140,17 +181,27 @@ def main():
 
             if course_key not in course_cache:
                 faculty = random.choice(faculty_records)
-
+                #if department_heads[department_name] == -1:
+                  #needs_head = True
+                  #while needs_head:
+                  #department_heads[department_name] = faculty["FacultyID"] if faculty["FacultyID"] not in department_heads.values() else -1
+                    #if (department_heads[department_name] != -1):
+                      #needs_head = False
+                    #else:
+                      
                 start_time = f"12:00"
                 end_time = f"14:00"
-
+                
                 days_of_week = "".join(random.sample(DAYS_OF_WEEK, random.randint(1, 3)))
-
+                #building = random.choice(BUILDINGS)
+                classroom_key = random.choice(classroom_keys)
+                #print(classroom_cache)
                 # Store this in course_cache for consistent details across students
                 course_cache[course_key] = {
                     "CourseName": course_name,
                     "DepartmentCode": department_code,
                     "DepartmentName": department_name,
+                    "DepartmentHead": department_heads[department_name],
                     "CourseCode": course_code,
                     "FacultyID": faculty["FacultyID"],
                     "FacultyFirstName": faculty["FacultyFirstName"],
@@ -161,9 +212,9 @@ def main():
                     "StartTime": start_time,
                     "EndTime": end_time,
                     "Grade": None,  # Grade will be assigned later for past semesters and left null if they have not taken the course yet,
-                    "Building": random.choice(BUILDINGS),
-                    "RoomNumber": random.randint(10,30),
-                    "Capacity": random.randint(15, 90)
+                    "Building": classroom_cache[classroom_key]["Building"],
+                    "RoomNumber": classroom_cache[classroom_key]["RoomNumber"],
+                    "Capacity": classroom_cache[classroom_key]["Capacity"]
                 }
 
             # Fetching course details from cache
@@ -184,8 +235,7 @@ def main():
     # Headers for csv file
     headers = [
         "StudentID", "StudentFirstName", "StudentLastName", "StudentEmail", "StudentDOB", "StudentGradDate",
-        "StudentMajor",
-        "CourseName", "DepartmentCode", "DepartmentName", "CourseCode", "Semester",
+        "StudentMajor", "CourseName", "DepartmentCode", "DepartmentName", "DepartmentHead","CourseCode", "Semester",
         "FacultyID", "FacultyFirstName", "FacultyLastName", "FacultyDOB", "FacultyEmail",
         "DaysOfWeek", "StartTime", "EndTime", "IsRequired", "Grade", "Building", "RoomNumber", "Capacity"
     ]

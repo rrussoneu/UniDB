@@ -98,8 +98,8 @@ CREATE TABLE IF NOT EXISTS Courses (
 Composite Key for Courses:
 ```{sql createCompositeCourseKeyView, connection=dbcon}
 CREATE VIEW CoursesWithComposite AS
-SELECT *, department_code || course_code || semester_offered AS composite_key
-FROM Courses;
+SELECT d.department_code || c.course_code || c.semester_offered AS composite_key
+FROM Courses c, Departments d where c.department_id = d.department_id
 ```
 
 Majors Table:
@@ -227,10 +227,8 @@ Populate Student Table
 get.students <- "select distinct StudentID,StudentFirstName,StudentLastName,StudentEmail,StudentDOB,StudentGradDate from `stu.data.raw`"
 stu.info <- sqldf(get.students)
 nrows <- nrow(stu.info)
-
 sql <- "insert into Students (student_id, first_name, last_name, birth_date, email, expected_graduation) values"
-#stu.info
-#nrows
+
 for (i in 1:nrows) {
   id <- stu.info$StudentID[i]
   f.name <- stu.info$StudentFirstName[i]
@@ -244,7 +242,7 @@ for (i in 1:nrows) {
   }
   sql <- paste0(sql, val)
 }
-#sql
+
 rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
@@ -255,10 +253,9 @@ Populate Faculty Table
 get.fac <- "select distinct FacultyID,FacultyFirstName,FacultyLastName,FacultyDOB, FacultyEmail from `stu.data.raw`"
 fac.info <- sqldf(get.fac)
 nrows <- nrow(fac.info)
-
 sql <- "insert into Faculty (faculty_id, first_name, last_name, birth_date, email) values"
-#fac.info
-#nrows
+
+
 for (i in 1:nrows) {
   id <- fac.info$FacultyID[i]
   f.name <- fac.info$FacultyFirstName[i]
@@ -271,7 +268,6 @@ for (i in 1:nrows) {
   }
   sql <- paste0(sql, val)
 }
-#sql
 rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
@@ -279,24 +275,25 @@ SELECT * FROM Faculty
 ```
 Populating Department Table
 ```{r}
-get.dep <- "select distinct DepartmentCode,DepartmentName from `stu.data.raw`"
+get.dep <- "select distinct DepartmentCode,DepartmentName, DepartmentHead from `stu.data.raw`"
 dep.info <- sqldf(get.dep)
 nrows <- nrow(dep.info)
+sql <- "insert into Departments (department_id, department_name, department_head, department_code) values"
 
-sql <- "insert into Departments (department_id, department_name, department_code) values"
-#fac.info
-#nrows
 for (i in 1:nrows) {
   id <- i
   name <- dep.info$DepartmentName[i]
   code <- dep.info$DepartmentCode[i]
-  val = paste0("(", id, ",'", name, "','", code, "')")
+  head <- dep.info$DepartmentHead[i]
+  if (head == -1) {
+    head <- "NULL"    
+  }
+  val = paste0("(", id, ",'", name, "',", head, ",'", code, "')")
   if (i != nrows) {
     val = paste0(val, ",")
   }
   sql <- paste0(sql, val)
 }
-#sql
 rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
@@ -312,14 +309,9 @@ Populate Courses Table:
 ```{r}
 get.courses <- "select distinct coursecode, semester, departmentcode, facultyid, CourseName from `stu.data.raw`"
 course.info <- sqldf(get.courses)
-course.info
-
 nrows <- nrow(course.info)
-
 sql <- "insert into Courses (course_id, course_name, department_id, faculty_id, semester_offered, course_code) values"
 
-#dep.id <- dbGetQuery(dbcon, "select department_id from departments where department_code = 'HIST'")
-#dep.id$department_id
 for (i in 1:nrows) {
   id <- i
   course.code <- course.info$CourseCode[i]
@@ -335,7 +327,6 @@ for (i in 1:nrows) {
   }
   sql <- paste0(sql, val)
 }
-
 rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
@@ -346,13 +337,9 @@ Populating Classroom Table
 get.rooms <- "select distinct Building, RoomNumber, Capacity from `stu.data.raw`"
 rooms.info <- sqldf(get.rooms)
 rooms.info
-
 nrows <- nrow(rooms.info)
-
 sql <- "insert into Classrooms (classroom_id, room_number, building_name, capacity) values"
 
-#dep.id <- dbGetQuery(dbcon, "select department_id from departments where department_code = 'HIST'")
-#dep.id$department_id
 for (i in 1:nrows) {
   id <- i
   room.num <- rooms.info$RoomNumber[i]
@@ -368,8 +355,18 @@ for (i in 1:nrows) {
 rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
-SELECT * FROM Classrooms ORDER BY classroom_id DESC
+SELECT * FROM Classrooms ORDER BY building_name DESC
 ```
+Populating Course Schedules Table:
+```{r}
+get.courses <- dbGetQuery(dbcon, "select * from courses")
+
+```
+
+```{sql connection=dbcon}
+SELECT * FROM CoursesWithComposite
+```
+
 ## Making Some Sample Queries
 
 ## Adding Some Triggers 
