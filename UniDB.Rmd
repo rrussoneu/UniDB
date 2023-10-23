@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS Students (
   birth_date DATE NOT NULL,
   email TEXT,
   expected_graduation DATE,
-  gpa NUMERIC(4),
+  gpa NUMERIC,
   PRIMARY KEY (student_id)
 )
 ```
