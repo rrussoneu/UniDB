@@ -285,7 +285,7 @@ rs <- dbExecute(dbcon, sql)
 ```{sql connection=dbcon}
 SELECT * FROM Faculty
 ```
-Populating Department Table
+Populate Department Table
 ```{r}
 get.dep <- "select distinct DepartmentCode,DepartmentName, DepartmentHead from `stu.data.raw`"
 dep.info <- sqldf(get.dep)
@@ -360,7 +360,7 @@ rs <- dbExecute(dbcon, sql)
 ```{sql connection=dbcon}
 SELECT * FROM Courses
 ```
-Populating Classrooms Table
+Populate Classrooms Table
 ```{r}
 get.rooms <- "select distinct Building, RoomNumber, Capacity from `stu.data.raw`"
 rooms.info <- sqldf(get.rooms)
@@ -385,7 +385,7 @@ rs <- dbExecute(dbcon, sql)
 ```{sql connection=dbcon}
 SELECT * FROM Classrooms ORDER BY building_name DESC
 ```
-Populating Course Schedules and Course Schedule Days Junction Table:
+Populate Course Schedules and Course Schedule Days Junction Table:
 ```{r}
 get.courses <- "select distinct coursecode, coursename, semester, departmentcode, Building, RoomNumber, Capacity, DaysOfWeek, StartTime,EndTime from `stu.data.raw`"
 c.info <- sqldf(get.courses)
@@ -428,7 +428,7 @@ rs <- dbExecute(dbcon, csd.sql)
 select * from courseScheduleDays
 ```
 
-Populating Major Table and StudentMajor Table
+Populate Major Table and StudentMajor Table
 ```{r}
 major.info <- "select distinct StudentID, StudentMajor from `stu.data.raw`"
 major.info <- sqldf(major.info)
@@ -461,7 +461,7 @@ rs <- dbExecute(dbcon, sql)
 ```{sql connection=dbcon}
 SELECT * FROM StudentMajors
 ```
-
+Populate Enrollment Table:
 ```{r}
 enrollment.info <- "select distinct StudentID, CourseCode, Semester, DepartmentCode, Grade from `stu.data.raw`"
 enrollment.info <- sqldf(enrollment.info)
@@ -510,7 +510,6 @@ for (i in 1:nrow(enrollment.info)) {
   }
   sql <- paste0(sql, val)
 }
-#print(sql)
 rs <- dbExecute(dbcon, sql)
 ```
 ```{sql connection=dbcon}
@@ -639,6 +638,10 @@ SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) as nt FROM UniAverag
 SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa from percents p, students s where p.nt < 18 and p.nt > 14 and p.student_id = s.student_id  ORDER BY p.AvgGpa DESC
 ```
 
+Get the average GPA for each department and the University Average to compare. We should expect everything to be around the average given the random data.
+```{sql connection=dbcon}
+SELECT d.department_name, avg(s.gpa) as AvgGpa, avg(u.AvgGpa) as UniAvg FROM Departments d, StudentMajors sm, Students s, Majors m, UniAverageGpas u WHERE d.department_id = m.department_id AND m.major_id = sm.major_id AND sm.student_id = s.student_id GROUP BY d.department_name
+```
 
 ## Adding Some Triggers 
 First, lets create something to update the student's gpa whenever they have a grade entered. Because grades won't usually be initially entered into enrollment we need one for a grade after it is updated at the end of a semester.
@@ -656,7 +659,6 @@ CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER INSERT ON Enrollment
     UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
   END;
 ```
-
 
 ## Inserting New Data and Checking Triggers
 
