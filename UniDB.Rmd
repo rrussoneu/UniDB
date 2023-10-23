@@ -647,7 +647,14 @@ CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER UPDATE ON Enrollment
   BEGIN
     UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
   END;
+```
 
+Also adding one for inserts just in case:
+```{sql connection=dbcon}
+CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER INSERT ON Enrollment 
+  BEGIN
+    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
+  END;
 ```
 
 
