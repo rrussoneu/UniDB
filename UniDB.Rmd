@@ -30,7 +30,24 @@ dbExecute(dbcon, "PRAGMA foreign_keys = ON")
 
 ## Create Tables
 
+Before continuing, a note about the methodology here: 
+- We can take two approaches to populating the tables using R and SQL code. One approach would be to use inserts with a list of values. On the other hand, we can take advantage of R's dbWriteTable() to speed this process up, and this is shown below. 
+
+### Helper Function Definition
+
+First, we can define a helper function to make dbWriteTable() a little easier
+```{r}
+loadDataToTable <- function(db, sql, tableName) {
+  sql
+  data.df <- sqldf(sql)
+  data.df
+  dbWriteTable(db, tableName, data.df, overwrite=F, append=T, row.names=F)
+}
+```
+
+### Table Creation
 Students Table:
+- First create the Students table
 ```{sql createStudents, connection=dbcon}
 CREATE TABLE IF NOT EXISTS Students (
   student_id INTEGER,
@@ -43,6 +60,72 @@ CREATE TABLE IF NOT EXISTS Students (
   PRIMARY KEY (student_id)
 )
 ```
+
+To emphasize the speed difference, before creating the rest of the tables, the Students table will be populated in the two aforementioned ways.
+
+Method one - Using insert with values:
+```{r}
+start.time <- Sys.time()
+get.students <- "select distinct StudentID,StudentFirstName,StudentLastName,StudentEmail,StudentDOB,StudentGradDate from `stu.data.raw`"
+stu.info <- sqldf(get.students)
+nrows <- nrow(stu.info)
+sql <- "insert into Students (student_id, first_name, last_name, birth_date, email, expected_graduation) values"
+
+for (i in 1:nrows) {
+  id <- stu.info$StudentID[i]
+  f.name <- stu.info$StudentFirstName[i]
+  l.name <- stu.info$StudentLastName[i]
+  email <- stu.info$StudentEmail[i]
+  dob <- stu.info$StudentDOB[i]
+  grad <- stu.info$StudentGradDate[i]
+  val = paste0("(", id, ",'", f.name, "','", l.name, "','", dob, "','", email, "','", grad, "')")
+  if (i != nrows) {
+    val = paste0(val, ",")
+  }
+  sql <- paste0(sql, val)
+}
+
+rs <- dbExecute(dbcon, sql)
+end.time <- Sys.time()
+students.time.one <- end.time - start.time
+```
+```{sql connection=dbcon}
+SELECT * FROM STUDENTS
+```
+Now, delete the records from the student table data:
+```{sql, connection=dbcon}
+DELETE FROM Students
+```
+And repopulate it:
+```{r}
+start.time <- Sys.time()
+get.students <- "
+                select distinct
+                  StudentID as student_id,
+                  StudentFirstName as first_name,
+                  StudentLastName as last_name,
+                  StudentEmail as email,
+                  StudentDOB as birth_date,
+                  StudentGradDate as expected_graduation 
+              from `stu.data.raw`"
+loadDataToTable(dbcon, get.students, "Students")
+end.time <- Sys.time()
+students.time.two <- end.time - start.time
+```
+First, check the Students table
+```{sql, connection=dbcon}
+SELECT * FROM Students
+```
+Now, let's see the time difference:
+```{r}
+stu.time.dif <- students.time.two - students.time.one
+dif.p <- (as.numeric(stu.time.dif) / as.numeric(students.time.one)) * 100
+print(paste0("Time difference in seconds: ", stu.time.dif))
+print(paste0("Time percent change: ", dif.p))
+```
+We can see that this greatly speeds up the process.
+
+Back to table creation...
 
 Faculty Table:
 ```{sql createFaculty, connection=dbcon}
@@ -207,14 +290,19 @@ CREATE TABLE IF NOT EXISTS Enrollment (
 
 ## Check Table Creation
 
-## Loading CSV Data
+## Loading CSV Data and Populating Tables
 
-Read the student data csv:
+Now, let's populate the tables
+
+### Getting the Data
+
+We already have the data loaded up into a data frame
 ```{r loadStudentData}
-stu.data.raw <- read.csv("generated_u_data.csv")
+stu.data.raw
 ```
 
-Populate Days of Week table:
+### Populating Tables
+Populate Days of Week table using an insert:
 ```{r insertDaysOfWeek}
 days = c("U", "M", "T", "W", "R", "F", "S")
 ndays = length(days)
@@ -234,79 +322,34 @@ rs <- dbExecute(dbcon, sql)
 ```{sql connection=dbcon}
 SELECT * FROM DaysOfWeek
 ```
-Populate Student Table
-```{r}
-get.students <- "select distinct StudentID,StudentFirstName,StudentLastName,StudentEmail,StudentDOB,StudentGradDate from `stu.data.raw`"
-stu.info <- sqldf(get.students)
-nrows <- nrow(stu.info)
-sql <- "insert into Students (student_id, first_name, last_name, birth_date, email, expected_graduation) values"
 
-for (i in 1:nrows) {
-  id <- stu.info$StudentID[i]
-  f.name <- stu.info$StudentFirstName[i]
-  l.name <- stu.info$StudentLastName[i]
-  email <- stu.info$StudentEmail[i]
-  dob <- stu.info$StudentDOB[i]
-  grad <- stu.info$StudentGradDate[i]
-  val = paste0("(", id, ",'", f.name, "','", l.name, "','", dob, "','", email, "','", grad, "')")
-  if (i != nrows) {
-    val = paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-}
-
-rs <- dbExecute(dbcon, sql)
-```
-```{sql connection=dbcon}
-SELECT * FROM STUDENTS
-```
 Populate Faculty Table
 ```{r}
-get.fac <- "select distinct FacultyID,FacultyFirstName,FacultyLastName,FacultyDOB, FacultyEmail from `stu.data.raw`"
-fac.info <- sqldf(get.fac)
-nrows <- nrow(fac.info)
-sql <- "insert into Faculty (faculty_id, first_name, last_name, birth_date, email) values"
-
-
-for (i in 1:nrows) {
-  id <- fac.info$FacultyID[i]
-  f.name <- fac.info$FacultyFirstName[i]
-  l.name <- fac.info$FacultyLastName[i]
-  email <- fac.info$FacultyEmail[i]
-  dob <- fac.info$FacultyDOB[i]
-  val = paste0("(", id, ",'", f.name, "','", l.name, "','", dob, "','", email, "')")
-  if (i != nrows) {
-    val = paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-}
-rs <- dbExecute(dbcon, sql)
+get.fac <- "select distinct 
+              FacultyID as faculty_id,
+              FacultyFirstName as first_name,
+              FacultyLastName as last_name,
+              FacultyDOB as birth_date,
+              FacultyEmail as email
+            from `stu.data.raw`"
+loadDataToTable(dbcon, get.fac, "Faculty")
 ```
 ```{sql connection=dbcon}
 SELECT * FROM Faculty
 ```
 Populate Department Table
 ```{r}
-get.dep <- "select distinct DepartmentCode,DepartmentName, DepartmentHead from `stu.data.raw`"
-dep.info <- sqldf(get.dep)
-nrows <- nrow(dep.info)
-sql <- "insert into Departments (department_id, department_name, department_head, department_code) values"
-
-for (i in 1:nrows) {
-  id <- i
-  name <- dep.info$DepartmentName[i]
-  code <- dep.info$DepartmentCode[i]
-  head <- dep.info$DepartmentHead[i]
-  if (head == -1) {
-    head <- "NULL"    
-  }
-  val = paste0("(", id, ",'", name, "',", head, ",'", code, "')")
-  if (i != nrows) {
-    val = paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-}
-rs <- dbExecute(dbcon, sql)
+get.dep <- " with dept as (
+              select distinct 
+                DepartmentCode as department_code,
+                DepartmentName department_name, 
+                DepartmentHead department_head 
+                from `stu.data.raw`
+            )
+            SELECT ROW_NUMBER() OVER (ORDER BY department_name) as department_id, dept.*
+            FROM dept"
+            
+loadDataToTable(dbcon, get.dep, "Departments")
 ```
 ```{sql connection=dbcon}
 SELECT * FROM Departments
@@ -432,6 +475,7 @@ Populate Major Table and StudentMajor Table
 ```{r}
 major.info <- "select distinct StudentID, StudentMajor from `stu.data.raw`"
 major.info <- sqldf(major.info)
+major.info
 majors <- unique(major.info$StudentMajor)
 m.rows <- length(majors[])
 major.sql <- "insert into majors (major_name, department_id) values "
@@ -445,7 +489,14 @@ for (i in 1:m.rows) {
 }
 
 rs <- dbExecute(dbcon, major.sql)
+```
 
+```{sql, connection=dbcon}
+SELECT * FROM Majors
+```
+
+
+```{r}
 sql <- "insert into StudentMajors (student_id, major_id) values "
 for (i in 1:nrow(major.info)) {
   major.id <- dbGetQuery(dbcon, paste0("select major_id from majors where major_name = '", major.info$StudentMajor[i], "'"))
@@ -659,6 +710,18 @@ CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER INSERT ON Enrollment
     UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
   END;
 ```
+
+Make sure that faculty members and rooms won't be double booked in the future:
+```{sql connection=dbcon}
+/*CREATE TRIGGER IF NOT EXISTS CheckBooking BEFORE INSERT ON CourseSchedules
+  BEGIN
+    WITH teachingTimes as (
+    SELECT s.start_time as start, s.end_time as end, c.course_id as cid, r.classroom_id as rid, f.faculty_id as fid, d.day_id as did, csd.day_id as csdid FROM Courses c, Faculty f, Classrooms r, CourseSchedules s, DaysOfWeek d, CourseScheduleDays csd WHERE c.faculty_id = f.faculty_id and c.course_id = s.course_id and s.classroom_id = r.classroom_id and csd.day_id = d.day_id and csd.course_id = s.schedule_id
+) IF NEW.start_time = teach
+  END;*/
+  SELECT s.start_time as start, s.end_time as end, c.course_id as cid, r.classroom_id as rid, f.faculty_id as fid, d.day_id as did, csd.day_id as csdid FROM Courses c, Faculty f, Classrooms r, CourseSchedules s, DaysOfWeek d, CourseScheduleDays csd WHERE c.faculty_id = f.faculty_id and c.course_id = s.course_id and s.classroom_id = r.classroom_id and csd.day_id = d.day_id and csd.schedule_id = s.schedule_id ORDER BY cid
+```
+
 
 ## Inserting New Data and Checking Triggers
 
