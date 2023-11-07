@@ -112,7 +112,7 @@ def main():
         first_name = random.choice(FIRST_NAMES)
         last_name = random.choice(LAST_NAMES)
         dob = f"20{random.randint(0, 2):02}-{random.randint(1, 12):02}-{random.randint(1, 28):02}" # Random birthdate
-        grad_date = "2024"  # Assuming all are set to graduate in 2024 for simplicity
+        grad_date = random.choice(["2024", "2025", "2026"]) 
         email = f"{first_name.lower()}.{last_name.lower()}{idx}@university.edu"
         major = random.choice(DEPARTMENTS)["DepartmentName"] # Give them a random major
         student_records.append({
@@ -188,7 +188,7 @@ def main():
                     #if (department_heads[department_name] != -1):
                       #needs_head = False
                     #else:
-                      
+                
                 start_time = f"12:00"
                 end_time = f"14:00"
                 
