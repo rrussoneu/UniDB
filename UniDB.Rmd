@@ -65,6 +65,7 @@ To emphasize the speed difference, before creating the rest of the tables, the S
 
 Method one - Using insert with values:
 ```{r}
+stu.data.raw <- read.csv('generated_u_data.csv')
 start.time <- Sys.time()
 get.students <- "select distinct StudentID,StudentFirstName,StudentLastName,StudentEmail,StudentDOB,StudentGradDate from `stu.data.raw`"
 stu.info <- sqldf(get.students)
@@ -339,14 +340,13 @@ SELECT * FROM Faculty
 ```
 Populate Department Table
 ```{r}
-get.dep <- " with dept as (
-              select distinct 
-                DepartmentCode as department_code,
-                DepartmentName department_name, 
-                DepartmentHead department_head 
-                from `stu.data.raw`
+get.dep <- " WITH dept AS (
+              SELECT DISTINCT DepartmentCode AS department_code,
+                DepartmentName AS department_name, 
+                DepartmentHead AS department_head 
+                FROM `stu.data.raw`
             )
-            SELECT ROW_NUMBER() OVER (ORDER BY department_name) as department_id, dept.*
+            SELECT ROW_NUMBER() OVER (ORDER BY department_name) AS department_id, dept.*
             FROM dept"
             
 loadDataToTable(dbcon, get.dep, "Departments")
@@ -357,26 +357,27 @@ SELECT * FROM Departments
 Populate Department Members
 ```{r}
 # probably need to go through the list and select distinct faculty again then get the dep
-sql <- "select distinct (FacultyID), DepartmentCode, DepartmentName from `stu.data.raw` order by facultyid"
-fd.info <- sqldf(sql) # There is an issue with faculty members teaching in various departments - resolve this
-sql <- "insert into DepartmentMembership (dm_id, faculty_id, department_id) values "
-nrows <- nrow(fd.info)
-for (i in 1:nrows) {
-  dept.id <- dbGetQuery(dbcon, paste0("select department_id from departments where department_code = '", fd.info$DepartmentCode[i], "'" ))
-  val <- paste0("(", i, ",", fd.info$FacultyID[i], ",", dept.id, ")")
-  if (i != nrows) {
-    val = paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-}
-
-rs <- dbExecute(dbcon, sql)
+deps <- dbGetQuery(dbcon, "SELECT * FROM Departments")
+get.dm <- " WITH tmp AS (
+              SELECT 
+                DISTINCT (s.FacultyID) AS faculty_id, 
+                s.DepartmentName AS department_name, 
+                s.DepartmentCode AS department_code,
+                d.department_id 
+              FROM `stu.data.raw` s, `deps` d
+              WHERE d.department_code = s.DepartmentCode
+              ORDER BY s.FacultyID
+            )
+            SELECT faculty_id, department_id FROM tmp"
+loadDataToTable(dbcon, get.dm, "DepartmentMembership")
 ```
+
 ```{sql connection=dbcon}
 SELECT * FROM DepartmentMembership
 ```
 
 Populate Courses Table:
+- Using a series of inserts here to demonstrate another approach just for fun
 ```{r}
 get.courses <- "select distinct coursecode, semester, departmentcode, facultyid, CourseName from `stu.data.raw`"
 course.info <- sqldf(get.courses)
@@ -404,55 +405,106 @@ rs <- dbExecute(dbcon, sql)
 SELECT * FROM Courses
 ```
 Populate Classrooms Table
+- Go back to using bulk loading to speed things up again
 ```{r}
-get.rooms <- "select distinct Building, RoomNumber, Capacity from `stu.data.raw`"
-rooms.info <- sqldf(get.rooms)
-rooms.info
-nrows <- nrow(rooms.info)
-sql <- "insert into Classrooms (classroom_id, room_number, building_name, capacity) values"
-
-for (i in 1:nrows) {
-  id <- i
-  room.num <- rooms.info$RoomNumber[i]
-  building <- rooms.info$Building[i]
-  capacity <- rooms.info$Capacity[i]
-  val = paste0("(", id, ",", room.num, ",'", building, "',", capacity, ")")
-  if (i != nrows) {
-    val = paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-}
-
-rs <- dbExecute(dbcon, sql)
+get.rooms <- "SELECT DISTINCT Building AS building_name, RoomNumber AS room_number, Capacity AS capacity FROM `stu.data.raw`"
+res <- loadDataToTable(dbcon, get.rooms, "Classrooms")
 ```
 ```{sql connection=dbcon}
 SELECT * FROM Classrooms ORDER BY building_name DESC
 ```
 Populate Course Schedules and Course Schedule Days Junction Table:
 ```{r}
-get.courses <- "select distinct coursecode, coursename, semester, departmentcode, Building, RoomNumber, Capacity, DaysOfWeek, StartTime,EndTime from `stu.data.raw`"
-c.info <- sqldf(get.courses)
-nrows = nrow(c.info)
-
-sql <- "insert into CourseSchedules (schedule_id, course_id, classroom_id, start_time, end_time) values "
+get.classrooms <- dbGetQuery(dbcon, "SELECT * FROM Classrooms")
+get.departments <- dbGetQuery(dbcon, "SELECT * FROM Departments")
+get.courses <- dbGetQuery(dbcon, "SELECT * FROM Courses")
+get.raw.info <- sqldf("SELECT 
+                  DISTINCT coursecode AS course_code, 
+                  coursename AS course_name, 
+                  semester AS semester_offered,
+                  departmentcode AS department_code, 
+                  building AS building_name,
+                  RoomNumber AS room_number, 
+                  Capacity AS capacity,
+                  DaysOfWeek,
+                  StartTime AS start_time,
+                  EndTime AS end_time
+                FROM `stu.data.raw`")
+get.course.schedules <- "WITH rooms AS (
+                          SELECT * FROM `get.classrooms`
+                        ),
+                        courses AS (
+                          SELECT * FROM `get.courses` 
+                        ),
+                        departments AS (
+                          SELECT * FROM `get.departments`
+                        )
+                        SELECT c.course_id, r.classroom_id, i.start_time, i.end_time
+                        FROM courses c, rooms r, departments d, `get.raw.info` i
+                        WHERE 
+                          r.building_name = i.building_name 
+                          AND
+                          r.capacity = i.capacity
+                          AND
+                          r.room_number = i.room_number
+                          AND
+                          d.department_id = c. department_id
+                          AND
+                          c.course_code = i.course_code
+                          AND
+                          d.department_code = i.department_code
+                          AND
+                          c.semester_offered = i.semester_offered"
+loadDataToTable(dbcon, get.course.schedules, "CourseSchedules")
+res <- dbGetQuery(dbcon, "SELECT * FROM CourseSchedules")
+res
+# schedules need: schedule_id, course_id, classroom_id, start_time, end_time
+# csd need: schedule_id, day_id
+```
+Course Schedule Days done in R and SQL:
+```{r}
+get.course.schedules <- dbGetQuery(dbcon, "SELECT schedule_id, course_id FROM CourseSchedules")
+get.days <- dbGetQuery(dbcon, "SELECT * FROM DaysOfWeek")
+get.course.schedule.info <- "WITH rooms AS (
+                          SELECT * FROM `get.classrooms`
+                        ),
+                        courses AS (
+                          SELECT * FROM `get.courses` 
+                        ),
+                        departments AS (
+                          SELECT * FROM `get.departments`
+                        ),
+                        scheds AS (
+                          SELECT * FROM `get.course.schedules`
+                        )
+                        SELECT s.*, i.DaysOfWeek
+                        FROM courses c, rooms r, departments d, `get.raw.info` i, scheds s
+                        WHERE 
+                          r.building_name = i.building_name 
+                          AND
+                          r.capacity = i.capacity
+                          AND
+                          r.room_number = i.room_number
+                          AND
+                          d.department_id = c. department_id
+                          AND
+                          c.course_code = i.course_code
+                          AND
+                          d.department_code = i.department_code
+                          AND
+                          c.semester_offered = i.semester_offered
+                          AND
+                          c.course_id = s.course_id
+                          "
 csd.sql <- "insert into CourseScheduleDays (schedule_id, day_id) values "
+res <- sqldf(get.course.schedule.info)
+nrows <- nrow(res)
 for (i in 1:nrows) {
-  b = c.info$Building[i]
-  r = c.info$RoomNumber[i]
-  capacity = c.info$Capacity[i]
-  get.cid <- "select classroom_id from classrooms where building_name = '"
-  get.cid <- paste0(get.cid, b, "' and room_number = ", r, " and capacity = ", capacity)
-  room.id = dbGetQuery(dbcon, get.cid)
-  course.id <- dbGetQuery(dbcon, paste0("select c.course_id, d.department_code from courses c, departments d  where d.department_id = c.department_id and c.course_code = '", c.info$CourseCode[i], "' and d.department_code = '", c.info$DepartmentCode[i], "' and c.semester_offered = '", c.info$Semester[i], "'"))
-  val = paste0("(", i, ",", course.id$course_id, ",", room.id, ",'", c.info$StartTime[i], "','", c.info$EndTime[i],"'", ")")
-  if (i != nrows) {
-    val = paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-  days.split <- strsplit(c.info$DaysOfWeek[i], split="", fixed=T)
-  for (j in 1:length(days.split)) {
-    get.day.id <- dbGetQuery(dbcon, paste0("select day_id from DaysOfWeek where day_name = '", days.split[[1]][j], "'"))
-    days.val <- paste0("(", i, ",", get.day.id$day_id, ")")
+  sid <- res$schedule_id[i]
+  days.split <- strsplit(res$DaysOfWeek[i], split="", fixed=T)
+  for (j in 1:length(days.split[[1]])) {
+    did <- sqldf(paste0("SELECT day_id FROM `get.days` WHERE day_name='", days.split[[1]][j], "'"))
+    days.val <- paste0("(", sid, ",", did, ")")
     if (i == nrows) {
       if (j == length(days.split)) {
         csd.sql <- paste0(csd.sql, days.val)
@@ -462,33 +514,29 @@ for (i in 1:nrows) {
     }
   }
 }
-
-rs <- dbExecute(dbcon, sql)
-rs <- dbExecute(dbcon, csd.sql)
+res <- dbExecute(dbcon, csd.sql)
 ```
-
 ```{sql connection=dbcon}
-select * from courseScheduleDays
+select * from CourseScheduleDays
 ```
 
 Populate Major Table and StudentMajor Table
 ```{r}
-major.info <- "select distinct StudentID, StudentMajor from `stu.data.raw`"
-major.info <- sqldf(major.info)
-major.info
-majors <- unique(major.info$StudentMajor)
-m.rows <- length(majors[])
-major.sql <- "insert into majors (major_name, department_id) values "
-for (i in 1:m.rows) {
-  dep.id <- dbGetQuery(dbcon, paste0("select department_id from departments where department_name ='", majors[i], "'"))
-  val <- paste0("('", majors[i], "',", dep.id, ")")
-  if (i != m.rows) {
-    val <- paste0(val, ",")
-  }
-  major.sql <- paste0(major.sql, val)
-}
-
-rs <- dbExecute(dbcon, major.sql)
+get.departments <- dbGetQuery(dbcon, "SELECT department_id, department_name FROM Departments")
+#rs <- dbExecute(dbcon, major.sql)
+major.info <- "WITH majors AS (
+                SELECT 
+                  DISTINCT StudentID AS student_id, 
+                  StudentMajor AS student_major 
+                FROM `stu.data.raw`
+              )
+              SELECT 
+                DISTINCT m.student_major AS major_name,
+                d.department_id 
+              FROM majors m, `get.departments` d 
+              WHERE d.department_name = m.student_major
+"
+loadDataToTable(dbcon, major.info, "Majors")
 ```
 
 ```{sql, connection=dbcon}
@@ -497,30 +545,31 @@ SELECT * FROM Majors
 
 
 ```{r}
-sql <- "insert into StudentMajors (student_id, major_id) values "
-for (i in 1:nrow(major.info)) {
-  major.id <- dbGetQuery(dbcon, paste0("select major_id from majors where major_name = '", major.info$StudentMajor[i], "'"))
-  val <- paste0 ("(", major.info$StudentID[i], ",", major.id, ")")
-  if (i != nrow(major.info)) {
-    val <- paste0(val, ",")
-  }
-  sql <- paste0(sql, val)
-}
+get.majors <- dbGetQuery(dbcon, "SELECT major_id, major_name FROM Majors")
+major.info <- "WITH stu_majors AS (
+                SELECT 
+                  DISTINCT StudentID AS student_id, 
+                  StudentMajor AS student_major 
+                FROM `stu.data.raw`
+              )
+              SELECT s.student_id, m.major_id
+              FROM stu_majors s, `get.majors` m
+              WHERE s.student_major = m.major_name
+"
+loadDataToTable(dbcon, major.info, "StudentMajors")
 
-rs <- dbExecute(dbcon, sql)
 ```
+
 ```{sql connection=dbcon}
-SELECT * FROM StudentMajors
+SELECT * FROM StudentMajors ORDER BY student_id
 ```
 Populate Enrollment Table:
 ```{r}
 enrollment.info <- "select distinct StudentID, CourseCode, Semester, DepartmentCode, Grade from `stu.data.raw`"
 enrollment.info <- sqldf(enrollment.info)
-enrollment.info
 sql <- "insert into enrollment (student_id, course_id, grade, points_earned) values "
 for (i in 1:nrow(enrollment.info)) {
   stu.id <- enrollment.info$StudentID[i]
-  #print(stu.id)
   c.code <- enrollment.info$CourseCode[i]
   dep.id <- dbGetQuery(dbcon, paste0("select department_id from departments where department_code = '", enrollment.info$DepartmentCode[i], "'"))
   c.id <- dbGetQuery(dbcon, paste0("select course_id from courses where course_code = '", c.code, "' and semester_offered ='", enrollment.info$Semester[i], "' and department_id ='", dep.id, "'"))
