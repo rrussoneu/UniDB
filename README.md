@@ -25,7 +25,7 @@ Various SQL queries are demonstrated and range from very simple to more complex.
 - Getting the students who earned various Latin Honors
 
 ### Triggers
-SQL triggers were also introduced to automate specific common tasks such as updating students' GPA's as their grades are entered and ensuring faculty members are not assigned to two courses happening at the same time.
+SQL triggers were also introduced to automate specific common tasks such as updating students' GPA's as their grades are entered. 
 
 ### Result
 Ultimately, a local SQLite database file is created and populated with the created tables and generated data. This database serves as a tangible outcome and can be used and expanded for further demonstration and exploration. While the data is fictional, a university setting provides a real world context to explore and demonstrate SQL and its capabilities.
