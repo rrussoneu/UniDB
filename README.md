@@ -23,6 +23,7 @@ Various SQL queries are demonstrated and range from very simple to more complex.
 - Calculating the average GPA of students in each department
 - Calculating the university's average GPA and student grades
 - Getting the students who earned various Latin Honors
+- Getting the top students in each major
 
 ### Triggers
 SQL triggers were also introduced to automate specific common tasks such as updating students' GPA's as their grades are entered. 
