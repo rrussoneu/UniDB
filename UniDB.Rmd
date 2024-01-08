@@ -5,7 +5,7 @@ output: html_notebook
 ---
 
 ## Overview
-This is a simple example implementation of a relational database for a university based off of the schema outlined in `University_ERD.pdf` which is in BCNF. It includes students, majors, courses, faculty, etc. Data will be loaded a csv file of students and the courses they have taken, and stored in a SQLite database using R and SQL, and at the end, various queries will be made. Student data is generated using `generate_data.py` and can be found in `generated_u_data.csv`.
+This is a simple example implementation of a relational database for a university based off of the schema outlined in `University_ERD.pdf` which is normalized to BCNF. It includes students, majors, courses, faculty, etc. Data will be loaded a csv file of students and the courses they have taken, and stored in a SQLite database using R and SQL, and at the end, various queries will be made. Student data is generated using `generate_data.py` and can be found in `generated_u_data.csv`.
 
 ## Connect To Database
 
@@ -626,7 +626,7 @@ SELECT AVG(grade) FROM Enrollment
 ```
 Get all of the grades for each student
 ```{sql connection=dbcon}
-SELECT DISTINCT s.student_id, e.grade FROM students s, enrollment e WHERE s.student_id = e.student_id
+SELECT DISTINCT s.student_id, e.grade FROM students s JOIN enrollment e ON s.student_id = e.student_id
 ```
 
 Get the average grade for each student
@@ -724,9 +724,13 @@ Get only the students who qualify for summa cum laude (first 5 percent):
 WITH percents as (
 SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) AS nt FROM UniAverageGpas
 )
-SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa 
-FROM percents p, students s 
-WHERE p.nt = 20 AND p.student_id = s.student_id 
+SELECT 
+  p.student_id, s.first_name, s.last_name, s.email, s.gpa 
+FROM 
+  percents p 
+  JOIN students s ON p.student_id = s.student_id 
+WHERE 
+  p.nt = 20
 ORDER BY p.AvgGpa DESC
 ```
 
@@ -735,9 +739,15 @@ Get only the students who qualify for magna cum laude (next 10 percent):
 WITH percents as (
 SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) AS nt FROM UniAverageGpas
 )
-SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa 
-FROM percents p, students s 
-WHERE p.nt < 20 AND p.nt > 17 AND p.student_id = s.student_id 
+SELECT 
+  p.student_id, s.first_name, s.last_name, s.email, s.gpa 
+FROM 
+  percents p 
+  JOIN students s ON p.student_id = s.student_id 
+WHERE 
+  p.nt < 20 
+  AND 
+  p.nt > 17
 ORDER BY p.AvgGpa DESC
 ```
 
@@ -746,17 +756,28 @@ Get only the students who qualify for cum laude (next 15 percent):
 WITH percents AS (
 SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) AS nt FROM UniAverageGpas
 )
-SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa 
-FROM percents p, students s 
-WHERE p.nt < 18 AND p.nt > 14 AND p.student_id = s.student_id 
+SELECT 
+  p.student_id, s.first_name, s.last_name, s.email, s.gpa 
+FROM 
+  percents p 
+  JOIN students s ON p.student_id = s.student_id 
+WHERE 
+  p.nt < 18 
+  AND 
+  p.nt > 14
 ORDER BY p.AvgGpa DESC
 ```
 
 Get the average GPA for each department and the University Average to compare. We should expect everything to be around the average given the random data.
 ```{sql connection=dbcon}
-SELECT d.department_name, AVG(s.gpa) AS AvgGpa, AVG(u.AvgGpa) AS UniAvg 
-FROM Departments d, StudentMajors sm, Students s, Majors m, UniAverageGpas u 
-WHERE d.department_id = m.department_id AND m.major_id = sm.major_id AND sm.student_id = s.student_id 
+SELECT 
+  d.department_name, AVG(s.gpa) AS AvgGpa, AVG(u.AvgGpa) AS UniAvg 
+FROM 
+  UniAverageGpas u,
+  Departments d 
+  JOIN Majors m ON d.department_id = m.department_id
+  JOIN StudentMajors sm ON m.major_id = sm.major_id
+  JOIN Students s ON s.student_id = sm.student_id
 GROUP BY d.department_name
 ```
 Let's get the top 10 GPA's for each Major, accounting for students with the same GPA by using DENSE_RANK():
@@ -773,8 +794,9 @@ FROM (
   FROM
     Students s
     JOIN StudentMajors sm ON s.student_id = sm.student_id
-    JOIN Majors m on sm.major_id = m.major_id
-    WHERE s.GPA IS NOT NULL
+    JOIN Majors m ON m.major_id = sm.major_id
+  WHERE 
+    s.GPA IS NOT NULL
 ) TopStudents
 WHERE stuRank <= 10
 ```
@@ -811,20 +833,27 @@ We can see the result is now updated.
 A view for getting the days and times a faculty member teaches to reference when a faculty member is adding a new course to their schedule:
 ```{sql connection=dbcon}
 CREATE VIEW facTimes AS
-SELECT s.course_id, s.start_time, s.end_time, c.faculty_id, d.day_name FROM CourseSchedules s, Courses c, DaysOfWeek d, CourseScheduleDays csd WHERE c.course_id = s.course_id AND csd.schedule_id = s.schedule_id AND csd.day_id = d.day_id ORDER BY c.faculty_id
+  SELECT 
+    s.course_id, s.start_time, s.end_time, c.faculty_id, d.day_name 
+  FROM 
+    CourseSchedules s
+    JOIN Courses c ON c.course_id = s.course_id
+    JOIN CourseScheduleDays csd ON csd.schedule_id = s.schedule_id 
+    JOIN DaysOfWeek d ON csd.day_id = d.day_id  
+  ORDER BY c.faculty_id
 ```
 
 ```{sql connection=dbcon}
 SELECT * FROM facTimes
 ```
-
+- The python script generates the same time for each course at the moment so this looks good
 
 ## Adding Some Triggers 
 Let's create something to update the student's gpa whenever they have a grade entered. Because grades won't usually be initially entered into enrollment we need one for a grade after it is updated at the end of a semester.
 ```{sql connection=dbcon}
 CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER UPDATE ON Enrollment 
   BEGIN
-    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
+    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas JOIN Students ON Students.student_id = UniAverageGpas.student_id);
   END;
 ```
 
@@ -832,7 +861,7 @@ Also adding one for inserts just in case:
 ```{sql connection=dbcon}
 CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER INSERT ON Enrollment 
   BEGIN
-    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
+    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas JOIN Students ON Students.student_id = UniAverageGpas.student_id);
   END;
 ```
 ```{sql connection=dbcon}
@@ -893,6 +922,7 @@ print(paste0("Time difference in seconds: ", time.dif))
 print(paste0("Time percent change: ", dif.p))
 ```
 We can see how this speeds up our query. A number of different indexes might be useful, and this is just an example of how they may be used. 
+This difference, however, varies depending on the run and sometimes it is slower. A likely cause of this is due to the fact that there is a very small amount of data and in the new query, there is some overhead to look up the index.
 
 ## Finish Up
 
