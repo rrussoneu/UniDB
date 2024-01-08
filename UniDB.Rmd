@@ -5,7 +5,7 @@ output: html_notebook
 ---
 
 ## Overview
-This is a simple example implementation of a relational database for a university based off of the schema outlined in `University_ERD.pdf` which is in BCNF. It includes students, majors, courses, faculty, etc. Data will be loaded a csv file of students and the courses they have taken, and stored in a SQLite database using R and SQL, and at the end, various queries will be made. Student data is generated using `generate_data.py` and can be found in `generated_u_data.csv`.
+This is a simple example implementation of a relational database for a university based off of the schema outlined in `University_ERD.pdf` which is normalized to BCNF. It includes students, majors, courses, faculty, etc. Data will be loaded a csv file of students and the courses they have taken, and stored in a SQLite database using R and SQL, and at the end, various queries will be made. Student data is generated using `generate_data.py` and can be found in `generated_u_data.csv`.
 
 ## Connect To Database
 
@@ -48,13 +48,15 @@ loadDataToTable <- function(db, sql, tableName) {
 ### Table Creation
 Students Table:
 - First create the Students table
+
+- The email attribute is not made unique here. In reality, it would make sense to make it unique, but because SQLite will create an implicit index, it is left out for now to showcase an index working later on in this project.
 ```{sql createStudents, connection=dbcon}
 CREATE TABLE IF NOT EXISTS Students (
   student_id INTEGER,
   first_name TEXT NOT NULL,
   last_name TEXT,
   birth_date DATE NOT NULL,
-  email TEXT UNIQUE,
+  email TEXT,
   expected_graduation DATE,
   gpa NUMERIC,
   PRIMARY KEY (student_id)
@@ -620,26 +622,26 @@ SELECT * FROM ENROLLMENT
 ## Making Some Sample Queries
 First, get the average grade for all students at the university
 ```{sql connection=dbcon}
-SELECT avg(e.grade) from enrollment e
+SELECT AVG(grade) FROM Enrollment
 ```
 Get all of the grades for each student
 ```{sql connection=dbcon}
-select distinct s.student_id, e.grade from students s, enrollment e where s.student_id = e.student_id
+SELECT DISTINCT s.student_id, e.grade FROM students s JOIN enrollment e ON s.student_id = e.student_id
 ```
 
 Get the average grade for each student
 ```{sql connection=dbcon}
-select student_id, avg(grade) as AvgGrade from enrollment group by student_id
+SELECT student_id AS ID, AVG(grade) AS AvgGrade FROM enrollment GROUP BY student_id
 ```
 Get students with an average grade above the average of the university
 ```{sql connection=dbcon}
-WITH avgGrades as (
-select student_id, avg(grade) as AvgGrade from enrollment group by student_id
+WITH avgGrades AS (
+SELECT student_id, AVG(grade) AS AvgGrade FROM enrollment GROUP BY student_id
 ),
-uniAvg as (
-SELECT avg(e.grade) as UniAvg from enrollment e
+uniAvg AS (
+SELECT AVG(e.grade) AS UniAvg FROM enrollment e
 )
-select a.student_id, a.AvgGrade from avgGrades a where (a.AvgGrade > (select UniAvg from uniAvg)) ORDER BY a.AvgGrade DESC
+SELECT a.student_id, a.AvgGrade FROM avgGrades a WHERE (a.AvgGrade > (SELECT UniAvg FROM uniAvg)) ORDER BY a.AvgGrade DESC
 ```
 This query is probably pretty common and so will be all the average grades. Let's turn them each into a view and make sure no null grades are added:
 ```{sql connection=dbcon}
@@ -722,9 +724,13 @@ Get only the students who qualify for summa cum laude (first 5 percent):
 WITH percents as (
 SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) AS nt FROM UniAverageGpas
 )
-SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa 
-FROM percents p, students s 
-WHERE p.nt = 20 AND p.student_id = s.student_id 
+SELECT 
+  p.student_id, s.first_name, s.last_name, s.email, s.gpa 
+FROM 
+  percents p 
+  JOIN students s ON p.student_id = s.student_id 
+WHERE 
+  p.nt = 20
 ORDER BY p.AvgGpa DESC
 ```
 
@@ -733,9 +739,15 @@ Get only the students who qualify for magna cum laude (next 10 percent):
 WITH percents as (
 SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) AS nt FROM UniAverageGpas
 )
-SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa 
-FROM percents p, students s 
-WHERE p.nt < 20 AND p.nt > 17 AND p.student_id = s.student_id 
+SELECT 
+  p.student_id, s.first_name, s.last_name, s.email, s.gpa 
+FROM 
+  percents p 
+  JOIN students s ON p.student_id = s.student_id 
+WHERE 
+  p.nt < 20 
+  AND 
+  p.nt > 17
 ORDER BY p.AvgGpa DESC
 ```
 
@@ -744,36 +756,104 @@ Get only the students who qualify for cum laude (next 15 percent):
 WITH percents AS (
 SELECT student_id, AvgGpa, NTILE(20) OVER (ORDER BY AvgGpa) AS nt FROM UniAverageGpas
 )
-SELECT p.student_id, s.first_name, s.last_name, s.email, s.gpa 
-FROM percents p, students s 
-WHERE p.nt < 18 AND p.nt > 14 AND p.student_id = s.student_id 
+SELECT 
+  p.student_id, s.first_name, s.last_name, s.email, s.gpa 
+FROM 
+  percents p 
+  JOIN students s ON p.student_id = s.student_id 
+WHERE 
+  p.nt < 18 
+  AND 
+  p.nt > 14
 ORDER BY p.AvgGpa DESC
 ```
 
 Get the average GPA for each department and the University Average to compare. We should expect everything to be around the average given the random data.
 ```{sql connection=dbcon}
-SELECT d.department_name, AVG(s.gpa) AS AvgGpa, AVG(u.AvgGpa) AS UniAvg 
-FROM Departments d, StudentMajors sm, Students s, Majors m, UniAverageGpas u 
-WHERE d.department_id = m.department_id AND m.major_id = sm.major_id AND sm.student_id = s.student_id 
+SELECT 
+  d.department_name, AVG(s.gpa) AS AvgGpa, AVG(u.AvgGpa) AS UniAvg 
+FROM 
+  UniAverageGpas u,
+  Departments d 
+  JOIN Majors m ON d.department_id = m.department_id
+  JOIN StudentMajors sm ON m.major_id = sm.major_id
+  JOIN Students s ON s.student_id = sm.student_id
 GROUP BY d.department_name
 ```
+Let's get the top 10 GPA's for each Major, accounting for students with the same GPA by using DENSE_RANK():
+```{sql, connection=dbcon}
+SELECT 
+  student_id AS 'StuID', email AS 'StuEmail', gpa AS 'StuGPA',  major_name AS 'MajorName' 
+FROM (
+  SELECT 
+    m.major_name, 
+    s.student_id, 
+    s.email, 
+    s.gpa,
+    DENSE_RANK() OVER (PARTITION BY sm.major_id ORDER BY s.gpa DESC) as stuRank
+  FROM
+    Students s
+    JOIN StudentMajors sm ON s.student_id = sm.student_id
+    JOIN Majors m ON m.major_id = sm.major_id
+  WHERE 
+    s.GPA IS NOT NULL
+) TopStudents
+WHERE stuRank <= 10
+```
+Some students here, however, may have only received grades for a small number of classes. Let's add a common table expression to account for this and make sure the students have a minimum of three grades:
+
+```{sql, connection=dbcon}
+WITH MinClasses AS (
+  SELECT student_id
+  FROM Enrollment
+  WHERE grade IS NOT NULL
+  GROUP BY student_id
+  HAVING COUNT(*) >= 3
+)
+SELECT 
+  student_id AS 'StuID', email AS 'StuEmail', gpa AS 'StuGPA',  major_name AS 'MajorName' 
+FROM (
+  SELECT 
+    m.major_name, 
+    s.student_id, 
+    s.email, 
+    s.gpa,
+    DENSE_RANK() OVER (PARTITION BY sm.major_id ORDER BY s.gpa DESC) as stuRank
+  FROM
+    Students s
+    JOIN StudentMajors sm ON s.student_id = sm.student_id
+    JOIN Majors m on sm.major_id = m.major_id
+    WHERE s.GPA IS NOT NULL
+    AND s.student_id IN (SELECT student_id FROM MinClasses)
+) TopStudents
+WHERE stuRank <= 10
+```
+We can see the result is now updated.
+
 A view for getting the days and times a faculty member teaches to reference when a faculty member is adding a new course to their schedule:
 ```{sql connection=dbcon}
 CREATE VIEW facTimes AS
-SELECT s.course_id, s.start_time, s.end_time, c.faculty_id, d.day_name FROM CourseSchedules s, Courses c, DaysOfWeek d, CourseScheduleDays csd WHERE c.course_id = s.course_id AND csd.schedule_id = s.schedule_id AND csd.day_id = d.day_id ORDER BY c.faculty_id
+  SELECT 
+    s.course_id, s.start_time, s.end_time, c.faculty_id, d.day_name 
+  FROM 
+    CourseSchedules s
+    JOIN Courses c ON c.course_id = s.course_id
+    JOIN CourseScheduleDays csd ON csd.schedule_id = s.schedule_id 
+    JOIN DaysOfWeek d ON csd.day_id = d.day_id  
+  ORDER BY c.faculty_id
 ```
 
 ```{sql connection=dbcon}
 SELECT * FROM facTimes
 ```
-
+- The python script generates the same time for each course at the moment so this looks good
 
 ## Adding Some Triggers 
 Let's create something to update the student's gpa whenever they have a grade entered. Because grades won't usually be initially entered into enrollment we need one for a grade after it is updated at the end of a semester.
 ```{sql connection=dbcon}
 CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER UPDATE ON Enrollment 
   BEGIN
-    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
+    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas JOIN Students ON Students.student_id = UniAverageGpas.student_id);
   END;
 ```
 
@@ -781,13 +861,25 @@ Also adding one for inserts just in case:
 ```{sql connection=dbcon}
 CREATE TRIGGER IF NOT EXISTS UpdateGpa AFTER INSERT ON Enrollment 
   BEGIN
-    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas where Students.student_id = UniAverageGpas.student_id);
+    UPDATE Students SET gpa = (SELECT AvgGpa FROM UniAverageGpas JOIN Students ON Students.student_id = UniAverageGpas.student_id);
   END;
 ```
 ```{sql connection=dbcon}
 SELECT * FROM CourseSchedules WHERE start_time < "13:00:00"
 ```
+
 ## Creating Indexes
+```{sql, connection = dbcon}
+DROP INDEX IF EXISTS idx_student_email
+```
+
+
+Let's view the current indexes that have been autogenerated:
+```{r}
+res <- dbGetQuery(dbcon, "SELECT `type`, `name`, `tbl_name`, `sql` FROM sqlite_master WHERE `type` = 'index'")
+res
+```
+
 Let's get a student's email to use and check the query plan:
 ```{r}
 stu.email <- dbGetQuery(dbcon, "SELECT first_name, last_name, email FROM Students WHERE student_id = 1")$email[1]
@@ -801,9 +893,16 @@ plan <- dbGetQuery(dbcon, sql)
 plan
 ```
 We can see that Students is scanned.
+
+The students table is not likely to be frequently changed. Only at the end or beginnings of semesters or during times off is it likely that there will be changes made such as adding new students as more become enrolled, or updating their gpa at the end of the semester. In fact, the only update to a record on the students table is likely on their gpa at the end of semesters. Given this, and the uniqueness of their email with the fact that it is likely that students may be searched for by email in a real world situation, an index on the email column makes sense.
 ```{sql connection=dbcon}
 CREATE UNIQUE INDEX idx_student_email ON Students (email)
 ```
+```{r}
+res <- dbGetQuery(dbcon, "SELECT `type`, `name`, `tbl_name`, `sql` FROM sqlite_master WHERE `type` = 'index'")
+res
+```
+
 ```{r}
 sql <- paste0("SELECT first_name, last_name, email FROM Students WHERE email ='", stu.email,"'")
 start.time <- Sys.time()
@@ -816,12 +915,14 @@ plan
 ```
 We can now see that the index is used to search the students instead. Let's see the time difference:
 ```{r}
+print(paste0("Time without an index: ", time.one, " vs with an index: ", time.two))
 time.dif <- time.two - time.one
 dif.p <- (as.numeric(time.dif) / as.numeric(time.one)) * 100
 print(paste0("Time difference in seconds: ", time.dif))
 print(paste0("Time percent change: ", dif.p))
 ```
 We can see how this speeds up our query. A number of different indexes might be useful, and this is just an example of how they may be used. 
+This difference, however, varies depending on the run and sometimes it is slower. A likely cause of this is due to the fact that there is a very small amount of data and in the new query, there is some overhead to look up the index.
 
 ## Finish Up
 
