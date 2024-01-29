@@ -358,21 +358,22 @@ SELECT * FROM Departments
 ```
 Populate Department Members
 ```{r}
-# probably need to go through the list and select distinct faculty again then get the dep
 deps <- dbGetQuery(dbcon, "SELECT * FROM Departments")
 get.dm <- " WITH tmp AS (
               SELECT 
                 DISTINCT (s.FacultyID) AS faculty_id, 
                 s.DepartmentName AS department_name, 
                 s.DepartmentCode AS department_code,
-                d.department_id 
-              FROM `stu.data.raw` s, `deps` d
-              WHERE d.department_code = s.DepartmentCode
+                d.department_id
+              FROM 
+                `stu.data.raw` s
+                JOIN `deps` d ON d.department_code = s.DepartmentCode
               ORDER BY s.FacultyID
             )
             SELECT faculty_id, department_id FROM tmp"
 loadDataToTable(dbcon, get.dm, "DepartmentMembership")
 ```
+
 
 ```{sql connection=dbcon}
 SELECT * FROM DepartmentMembership
@@ -442,26 +443,15 @@ get.course.schedules <- "WITH rooms AS (
                           SELECT * FROM `get.departments`
                         )
                         SELECT c.course_id, r.classroom_id, i.start_time, i.end_time
-                        FROM courses c, rooms r, departments d, `get.raw.info` i
-                        WHERE 
-                          r.building_name = i.building_name 
-                          AND
-                          r.capacity = i.capacity
-                          AND
-                          r.room_number = i.room_number
-                          AND
-                          d.department_id = c. department_id
-                          AND
-                          c.course_code = i.course_code
-                          AND
-                          d.department_code = i.department_code
-                          AND
-                          c.semester_offered = i.semester_offered"
+                        FROM 
+                          `get.raw.info` i
+                          JOIN rooms r ON 
+                            r.building_name = i.building_name AND r.capacity = i.capacity AND r.room_number = i.room_number 
+                          JOIN courses c ON c.course_code = i.course_code AND c.semester_offered = i.semester_offered
+                          JOIN departments d ON d.department_id = c.department_id AND d.department_code = i.department_code"
 loadDataToTable(dbcon, get.course.schedules, "CourseSchedules")
 res <- dbGetQuery(dbcon, "SELECT * FROM CourseSchedules")
 res
-# schedules need: schedule_id, course_id, classroom_id, start_time, end_time
-# csd need: schedule_id, day_id
 ```
 Course Schedule Days done in R and SQL:
 ```{r}
@@ -480,23 +470,12 @@ get.course.schedule.info <- "WITH rooms AS (
                           SELECT * FROM `get.course.schedules`
                         )
                         SELECT s.*, i.DaysOfWeek
-                        FROM courses c, rooms r, departments d, `get.raw.info` i, scheds s
-                        WHERE 
-                          r.building_name = i.building_name 
-                          AND
-                          r.capacity = i.capacity
-                          AND
-                          r.room_number = i.room_number
-                          AND
-                          d.department_id = c. department_id
-                          AND
-                          c.course_code = i.course_code
-                          AND
-                          d.department_code = i.department_code
-                          AND
-                          c.semester_offered = i.semester_offered
-                          AND
-                          c.course_id = s.course_id
+                        FROM 
+                          `get.raw.info` i
+                          JOIN rooms r ON r.building_name = i.building_name AND r.capacity = i.capacity AND r.room_number = i.room_number
+                          JOIN courses c ON c.course_code = i.course_code AND c.semester_offered = i.semester_offered
+                          JOIN departments d ON d.department_id = c.department_id AND d.department_code = i.department_code
+                          JOIN scheds s ON c.course_id = s.course_id
                           "
 csd.sql <- "insert into CourseScheduleDays (schedule_id, day_id) values "
 res <- sqldf(get.course.schedule.info)
@@ -535,8 +514,9 @@ major.info <- "WITH majors AS (
               SELECT 
                 DISTINCT m.student_major AS major_name,
                 d.department_id 
-              FROM majors m, `get.departments` d 
-              WHERE d.department_name = m.student_major
+              FROM 
+                majors m
+                JOIN `get.departments` d ON d.department_name = m.student_major
 "
 loadDataToTable(dbcon, major.info, "Majors")
 ```
@@ -555,8 +535,9 @@ major.info <- "WITH stu_majors AS (
                 FROM `stu.data.raw`
               )
               SELECT s.student_id, m.major_id
-              FROM stu_majors s, `get.majors` m
-              WHERE s.student_major = m.major_name
+              FROM
+                stu_majors s 
+                JOIN `get.majors` m ON s.student_major = m.major_name
 "
 loadDataToTable(dbcon, major.info, "StudentMajors")
 
